@@ -2,7 +2,8 @@ from fastapi import APIRouter
 from raft_node import RaftNode
 from controllers.raft_controller import create_controller
 from models import *
-from fastapi.responses import JSONResponse
+from fastapi.responses import RedirectResponse
+from config import NODE_ROLES
 
 def get_router_with_node(node: RaftNode):
     router = APIRouter()
@@ -11,9 +12,6 @@ def get_router_with_node(node: RaftNode):
 
     @router.post("/ping", response_model=HeartBeatResponse)
     async def receive_heartbeat(req: HeartBeatRequest):
-        # return handle_heartbeat(req)
-        # response = node.handle_heartbeat(req)
-        # return JSONResponse(content=response.dict())
         print(f"[PING] Received from {req.node_id}")
         return node.handle_heartbeat(req)
 
@@ -27,8 +25,9 @@ def get_router_with_node(node: RaftNode):
     
     @router.get("/cluster-state")
     async def cluster_state():
+        if node.curr_role != NODE_ROLES["LEADER"]:
+            return RedirectResponse(url = f"""{node.peers[node.current_leader]["peer_url"]}/cluster-state""")
         return node.get_cluster_state()
-
 
     @router.post("/leader-announcement", response_model = LeaderAnnouncementResponse)
     async def leader_announcement_ack(req: LeaderAnnouncementRequest):

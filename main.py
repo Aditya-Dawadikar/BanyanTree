@@ -31,5 +31,4 @@ app.include_router(get_router_with_node(node))
 async def start_background_tasks():
     print(f"[STARTUP] Node {NODE_ID} starting background tasks.")
     asyncio.create_task(node.election_timeout_loop())
-    asyncio.create_task(node.heartbeat_loop())
     asyncio.create_task(node.heartbeat_timeout_loop())
