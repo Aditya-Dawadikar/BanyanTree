@@ -1,7 +1,8 @@
 import os
 import asyncio
 from fastapi import FastAPI
-from routes.raft_routes import get_router_with_node
+from routes.raft_routes import get_router_with_node as raft_router
+from routes.store_routes import get_store_router as store_router
 from config_loader import load_config
 from raft_node import RaftNode
 
@@ -24,7 +25,8 @@ for peer_id, peer_url in PEERS.items():
         node.add_peer(peer_id, NODE_ROLES["FOLLOWER"], peer_url)
 
 # Add routes with node context
-app.include_router(get_router_with_node(node))
+app.include_router(raft_router(node))
+app.include_router(store_router(node))
 
 # Background tasks
 @app.on_event("startup")

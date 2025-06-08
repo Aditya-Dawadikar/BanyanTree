@@ -6,8 +6,6 @@ from models import (
     LeaderAnnouncementRequest, LeaderAnnouncementResponse
 )
 
-# node = RaftNode(node_id="unknown") 
-
 def create_controller(node: RaftNode):
     def request_votes(req: RequestVoteRequest) -> RequestVoteResponse:
         return node.handle_request_vote(req)

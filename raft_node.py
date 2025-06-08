@@ -5,12 +5,14 @@ from datetime import datetime, timezone
 from peer import Peer
 from models import (RequestVoteRequest,
                     RequestVoteResponse,
+                    LogEntry,
                     AppendEntriesRequest,
                     AppendEntriesResponse,
                     HeartBeatRequest,
                     HeartBeatResponse,
                     LeaderAnnouncementRequest,
                     LeaderAnnouncementResponse)
+from store import Store
 import random
 
 
@@ -19,7 +21,9 @@ class RaftNode:
     def __init__(self, node_id:str):
         self.node_id = node_id
         self.curr_role = NODE_ROLES["FOLLOWER"]
-    
+
+        self.store = Store()
+
         self.current_leader = None
         self.current_term = 0
         self.voted_for = None
@@ -42,8 +46,6 @@ class RaftNode:
     def handle_request_vote(self, req: RequestVoteRequest):
         # Step 1: if candidates term is less than my current term,
         # reject vote
-        print("&&&&&&&&&&&&&&&&&&&&&")
-        print(req.term, self.current_term)
         self.is_election = True
         if req.term < self.current_term:
             return RequestVoteResponse(vote_granted=False, term=self.current_term)
@@ -54,7 +56,21 @@ class RaftNode:
         return self.become_follower(req.term, req.candidate_id)
 
     def handle_append_entries(self, req: AppendEntriesRequest):
-        return AppendEntriesResponse(term=self.current_term, success=False)
+        for entry in req.entries:
+            cmd = entry.command
+            if cmd["type"] == "SET":
+                self.store.add_record(cmd["key"], cmd["value"])
+            elif cmd["type"] == "DELETE":
+                self.store.delete_record(cmd["key"])
+            elif cmd["type"] == "COMMIT":
+                self.store.commit_record(cmd["key"])
+            else:
+                print(f"[UNKNOWN CMD] {cmd['type']}")
+
+            self.log.append(entry)  # entry is already a LogEntry
+        return AppendEntriesResponse(term=self.current_term, success=True)
+
+
 
     def become_follower(self, term, candidate_id):
         self.curr_role = NODE_ROLES["FOLLOWER"]
@@ -198,7 +214,6 @@ class RaftNode:
 
         return HeartBeatResponse(ack=False, timestamp=timestamp)
 
-
     def mark_dead(self, leader_id):
         # only leader
         try:
@@ -293,3 +308,73 @@ class RaftNode:
             "total_nodes": len(self.peers),
             "peers": self.peers
         }
+
+    def handle_client_write(self, key, value):
+        self.store.add_record(key, value)
+
+        new_log_entry = LogEntry(
+            term=self.current_term,
+            command={
+                "type": "SET",
+                "key": key,
+                "value": value
+            },
+            index=len(self.log),
+            committed=False
+        )
+
+        self.log.append(new_log_entry)
+        asyncio.create_task(self.replicate_and_commit(new_log_entry))
+
+    async def replicate_and_commit(self, entry: LogEntry):
+        success_count = 1  # include self
+        async with AsyncClient() as client:
+            for peer_id, peer in self.peers.items():
+                try:
+                    req = AppendEntriesRequest(
+                        term=self.current_term,
+                        leader_id=self.node_id,
+                        prev_log_index=len(self.log) - 2,
+                        prev_log_term=self.log[-2].term if len(self.log) > 1 else 0,
+                        entries=[entry],
+                        leader_commit=self.commit_index
+                    )
+                    resp = await client.post(f"{peer['peer_url']}/append-entries", json=req.model_dump())
+                    data = resp.json()
+                    if data["success"]:
+                        success_count += 1
+                except Exception as e:
+                    print(f"[LOG REPL] Failed to replicate to {peer_id}: {e}")
+
+        if success_count > len(self.peers) // 2:
+            print(f"[COMMIT] Majority ack for {entry.command['type']} {entry.command['key']}")
+
+            commit_entry = LogEntry(
+                term=self.current_term,
+                command={
+                    "type": "COMMIT",
+                    "key": entry.command["key"]
+                },
+                index=len(self.log),
+                committed=True
+            )
+            self.log.append(commit_entry)
+            self.commit_index = commit_entry.index
+            self.store.commit_record(commit_entry.command["key"])
+            asyncio.create_task(self.replicate_commit(commit_entry))
+
+    async def replicate_commit(self, commit_entry: LogEntry):
+        async with AsyncClient() as client:
+            for peer_id, peer in self.peers.items():
+                try:
+                    req = AppendEntriesRequest(
+                        term=self.current_term,
+                        leader_id=self.node_id,
+                        prev_log_index=commit_entry.index - 1,
+                        prev_log_term=self.log[commit_entry.index - 1].term if commit_entry.index > 0 else 0,
+                        entries=[commit_entry],
+                        leader_commit=self.commit_index
+                    )
+                    await client.post(f"{peer['peer_url']}/append-entries", json=req.model_dump())
+                except Exception as e:
+                    print(f"[COMMIT REPLICATE] {peer_id} failed: {e}")

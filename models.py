@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Union
 
 class HeartBeatRequest(BaseModel):
     node_id: str
@@ -11,7 +11,9 @@ class HeartBeatResponse(BaseModel):
 
 class LogEntry(BaseModel):
     term: int
-    command: str
+    command: Dict[str, Union[str, int, float, bool]]
+    index: int
+    committed: bool = False
 
 class RequestVoteRequest(BaseModel):
     term: int
@@ -42,3 +44,21 @@ class AppendEntriesRequest(BaseModel):
 class AppendEntriesResponse(BaseModel):
     term: int
     success: bool
+
+class AddRecordRequest(BaseModel):
+    key: str
+    value: str
+
+class AddRecordResponse(BaseModel):
+    success: bool
+    message: str
+    key: str
+
+class GetRecordResponse(BaseModel):
+    key: str
+    value: Optional[str]  # or Any if needed
+    status: str
+    is_deleted: bool
+    created_at: float
+    last_updated_at: float
+    last_committed_at: Optional[float]
