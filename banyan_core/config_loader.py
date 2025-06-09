@@ -1,5 +1,3 @@
-# config_loader.py
-
 import sys
 
 def load_config(node_id):

@@ -2,7 +2,6 @@ import asyncio
 from config import NODE_ROLES
 from httpx import AsyncClient
 from datetime import datetime, timezone
-from peer import Peer
 from models import (RequestVoteRequest,
                     RequestVoteResponse,
                     LogEntry,
@@ -227,7 +226,6 @@ class RaftNode:
             return HeartBeatResponse(ack=True, timestamp=timestamp)
 
         return HeartBeatResponse(ack=False, timestamp=timestamp)
-
 
     def mark_dead(self, leader_id):
         # only leader
