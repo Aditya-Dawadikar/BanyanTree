@@ -34,3 +34,4 @@ async def start_background_tasks():
     print(f"[STARTUP] Node {NODE_ID} starting background tasks.")
     asyncio.create_task(node.election_timeout_loop())
     asyncio.create_task(node.heartbeat_timeout_loop())
+    asyncio.create_task(node.fetch_full_log_from_leader())

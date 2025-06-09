@@ -63,14 +63,13 @@ class RaftNode:
             elif cmd["type"] == "DELETE":
                 self.store.delete_record(cmd["key"])
             elif cmd["type"] == "COMMIT":
+                print(f"[COMMIT] Received commit for {cmd['key']}")
                 self.store.commit_record(cmd["key"])
             else:
                 print(f"[UNKNOWN CMD] {cmd['type']}")
 
             self.log.append(entry)  # entry is already a LogEntry
         return AppendEntriesResponse(term=self.current_term, success=True)
-
-
 
     def become_follower(self, term, candidate_id):
         self.curr_role = NODE_ROLES["FOLLOWER"]
@@ -177,6 +176,9 @@ class RaftNode:
             self.peers[req.leader_id]["role"] = NODE_ROLES["LEADER"]
             self.peers[req.leader_id]["last_seen"] = str(datetime.now(timezone.utc).timestamp())
 
+            # fetch log
+            asyncio.create_task(self.fetch_full_log_from_leader())
+
         return LeaderAnnouncementResponse(
             ack=True,
             timestamp=str(datetime.now(timezone.utc).timestamp())
@@ -197,22 +199,35 @@ class RaftNode:
 
                     if data.get("ack", False):
                         self.peers[peer]["is_alive"] = True
+                    else:
+                        self.peers[peer]["is_alive"] = False
 
                 except Exception as e:
                     print(f"[HEARTBEAT] Failed to reach {peer}: {e}")
+                    self.peers[peer]["is_alive"] = False
 
     def handle_heartbeat(self, req: HeartBeatRequest):
         timestamp = str(datetime.now(timezone.utc).timestamp())
+
         # Accept heartbeat from any peer and update current_leader if needed
         if self.current_leader is None:
             self.current_leader = req.node_id
+            asyncio.create_task(self.fetch_full_log_from_leader())
 
         if req.node_id == self.current_leader and req.node_id in self.peers:
+            was_dead = not self.peers[req.node_id].get("is_alive", False)
+
             self.peers[req.node_id]["is_alive"] = True
             self.peers[req.node_id]["last_seen"] = timestamp
+
+            if was_dead:
+                print(f"[SYNC] Detected reconnection to leader {req.node_id}, syncing log")
+                asyncio.create_task(self.fetch_full_log_from_leader())
+
             return HeartBeatResponse(ack=True, timestamp=timestamp)
 
         return HeartBeatResponse(ack=False, timestamp=timestamp)
+
 
     def mark_dead(self, leader_id):
         # only leader
@@ -300,7 +315,8 @@ class RaftNode:
                 live_node_count += 1
         print(self.peers)
         return {
-            "leader_id": self.node_id,
+            "leader_id": self.current_leader,
+            "node_id": self.node_id,
             "role": self.curr_role,
             "current_term": self.current_term,
             "is_election": self.is_election,
@@ -378,3 +394,17 @@ class RaftNode:
                     await client.post(f"{peer['peer_url']}/append-entries", json=req.model_dump())
                 except Exception as e:
                     print(f"[COMMIT REPLICATE] {peer_id} failed: {e}")
+
+    async def fetch_full_log_from_leader(self):
+        if not self.current_leader:
+            return
+
+        leader_url = self.peers[self.current_leader]["peer_url"]
+        async with AsyncClient() as client:
+            try:
+                resp = await client.get(f"{leader_url}/sync-entries")
+                data = resp.json()
+                req = AppendEntriesRequest(**data)
+                self.handle_append_entries(req)
+            except Exception as e:
+                print(f"[SYNC] Failed to sync from leader: {e}")

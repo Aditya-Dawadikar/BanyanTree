@@ -7,8 +7,7 @@ from config import NODE_ROLES
 
 def get_router_with_node(node: RaftNode):
     router = APIRouter()
-    # node = RaftNode(node_id=node_id)
-    request_votes, append_entries, handle_heartbeat = create_controller(node)
+    request_votes, append_entries = create_controller(node)
 
     @router.post("/ping", response_model=HeartBeatResponse)
     async def receive_heartbeat(req: HeartBeatRequest):
@@ -22,6 +21,20 @@ def get_router_with_node(node: RaftNode):
     @router.post("/append-entries", response_model=AppendEntriesResponse)
     async def append_endpoint(req: AppendEntriesRequest):
         return append_entries(req)
+    
+    @router.get("/sync-entries", response_model=AppendEntriesRequest)
+    async def sync_entries():
+        if node.curr_role != NODE_ROLES["LEADER"]:
+            return RedirectResponse(url=f"{node.peers[node.current_leader]['peer_url']}/sync-entries")
+
+        return AppendEntriesRequest(
+            term=node.current_term,
+            leader_id=node.node_id,
+            prev_log_index=-1,
+            prev_log_term=0,
+            entries=node.log,
+            leader_commit=node.commit_index
+        )
     
     @router.get("/cluster-state")
     async def cluster_state():
