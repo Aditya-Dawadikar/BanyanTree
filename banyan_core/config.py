@@ -10,4 +10,9 @@ RECORD_STATUS = {
     "COMMITTED": 1
 }
 
+KAFKA_TOPICS = {
+    "RAFT_TOPIC": "raft-logs",
+    "STORE_TOPIC": "store-logs"
+}
+
 STATUS_MAP = {v: k for k, v in RECORD_STATUS.items()}

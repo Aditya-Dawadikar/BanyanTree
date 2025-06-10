@@ -12,15 +12,15 @@ def get_router_with_node(node: RaftNode):
     @router.post("/ping", response_model=HeartBeatResponse)
     async def receive_heartbeat(req: HeartBeatRequest):
         print(f"[PING] Received from {req.node_id}")
-        return node.handle_heartbeat(req)
+        return await node.handle_heartbeat(req)
 
     @router.post("/request-vote", response_model=RequestVoteResponse)
     async def vote_endpoint(req: RequestVoteRequest):
-        return request_votes(req)
+        return await request_votes(req)
 
     @router.post("/append-entries", response_model=AppendEntriesResponse)
     async def append_endpoint(req: AppendEntriesRequest):
-        return append_entries(req)
+        return await append_entries(req)
     
     @router.get("/sync-entries", response_model=AppendEntriesRequest)
     async def sync_entries():
@@ -44,14 +44,14 @@ def get_router_with_node(node: RaftNode):
     
     @router.get("/cluster-state")
     async def cluster_state():
-        return node.get_cluster_state()
+        return await node.get_cluster_state()
 
     @router.post("/leader-announcement", response_model = LeaderAnnouncementResponse)
     async def leader_announcement_ack(req: LeaderAnnouncementRequest):
-        return node.handle_leader_ack(req)
+        return await node.handle_leader_ack(req)
 
     @router.get("/leader-consensus", response_model = LeaderConsensusResponse)
     async def get_leader_consesnsus():
-        return node.get_leader()
+        return await node.get_leader()
 
     return router

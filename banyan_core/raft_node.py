@@ -1,5 +1,5 @@
 import asyncio
-from config import NODE_ROLES
+from config import NODE_ROLES, KAFKA_TOPICS
 from httpx import AsyncClient
 from datetime import datetime, timezone
 from models import (RequestVoteRequest,
@@ -15,11 +15,12 @@ from models import (RequestVoteRequest,
 from store import Store
 import random
 from collections import Counter
+from logger import BanyanCoreLogger
 
 
 
 class RaftNode:
-    def __init__(self, node_id:str):
+    def __init__(self, node_id:str, logger:BanyanCoreLogger=None):
         self.node_id = node_id
         self.curr_role = NODE_ROLES["FOLLOWER"]
 
@@ -45,8 +46,10 @@ class RaftNode:
         self.is_election = False
 
         self.rootkeeper = None
+
+        self.logger = logger
     
-    def handle_request_vote(self, req: RequestVoteRequest):
+    async def handle_request_vote(self, req: RequestVoteRequest):
         if self.curr_role == NODE_ROLES["ROOTKEEPER"]:
             return RequestVoteResponse(
                     vote_granted=False,
@@ -63,9 +66,9 @@ class RaftNode:
         # Step 2: If candidates term is greater than my current term,
         # update my term and become follower
         self.current_term = req.term
-        return self.become_follower(req.term, req.candidate_id)
+        return await self.become_follower(req.term, req.candidate_id)
 
-    def handle_append_entries(self, req: AppendEntriesRequest):
+    async def handle_append_entries(self, req: AppendEntriesRequest):
         for entry in req.entries:
             cmd = entry.command
             if cmd["type"] == "SET":
@@ -73,15 +76,19 @@ class RaftNode:
             elif cmd["type"] == "DELETE":
                 self.store.delete_record(cmd["key"])
             elif cmd["type"] == "COMMIT":
-                print(f"[COMMIT] Received commit for {cmd['key']}")
+                log_msg = f"[COMMIT] Received commit for {cmd['key']}"
+                
+                await self.logger.log(KAFKA_TOPICS["STORE_TOPIC"],log_msg)
                 self.store.commit_record(cmd["key"])
             else:
-                print(f"[UNKNOWN CMD] {cmd['type']}")
+                log_msg = f"[UNKNOWN CMD] {cmd['type']}"
+                
+                await self.logger.log(KAFKA_TOPICS["STORE_TOPIC"],log_msg)
 
             self.log.append(entry)  # entry is already a LogEntry
         return AppendEntriesResponse(term=self.current_term, success=True)
 
-    def become_follower(self, term, candidate_id):
+    async def become_follower(self, term, candidate_id):
         self.curr_role = NODE_ROLES["FOLLOWER"]
         self.current_term = term
         self.voted_for = candidate_id
@@ -133,7 +140,9 @@ class RaftNode:
                             ack_count += 1
 
                 except Exception as e:
-                    print(f"[LEADER_ACK] Failed to reach {peer}: {e}")
+                    log_msg = f"[LEADER_ACK] Failed to reach {peer}: {e}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
         valid_voter_count = 0
         for voter in self.peers:
@@ -179,13 +188,20 @@ class RaftNode:
                     try:
                         resp = await client.post(f"{val['peer_url']}/request-vote", json=req.dict())
                         data = resp.json()
+                        log_msg = None
                         if data.get("vote_granted") is True:
                             self.votes_received += 1
-                            print(f"[VOTE] {peer} voted")
+                            log_msg = f"[VOTE] {peer} voted"
+                            
+                            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                         else:
-                            print(f"[VOTE] {peer} rejected vote")
+                            log_msg = f"[VOTE] {peer} rejected vote"
+                            
+                            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                     except Exception as e:
-                        print(f"[CANDIDATE] Failed to reach {peer}: {e}")
+                        log_msg = f"[CANDIDATE] Failed to reach {peer}: {e}"
+                        
+                        await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
         valid_voter_count = 0
         for voter in self.peers:
@@ -198,8 +214,12 @@ class RaftNode:
         if self.votes_received >= majority:
             await self.become_leader()
 
-    def handle_leader_ack(self, req: LeaderAnnouncementRequest):
-        print(f"[LEADER_ANNOUNCE] Received from {req.leader_id} at node {self.node_id}")
+    async def handle_leader_ack(self, req: LeaderAnnouncementRequest):
+        log_msg = f"[LEADER_ANNOUNCE] Received from {req.leader_id} at node {self.node_id}"
+        
+        await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
+
+
         self.current_leader = req.leader_id
         self.voted_for = None
         self.is_election = False
@@ -236,8 +256,10 @@ class RaftNode:
                     resp = await client.post(f"""{val["peer_url"]}/ping""", json=req.dict())
                     data = resp.json()
 
-                    print("++++++++++++++++++++++++")
-                    print("[PING ACK] ",peer, data)
+                    # print("++++++++++++++++++++++++")
+                    log_msg = f"[PING ACK] {peer} | {data}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
                     if data.get("ack", None):
                         self.peers[peer]["is_alive"] = True
@@ -245,10 +267,12 @@ class RaftNode:
                         self.peers[peer]["is_alive"] = False
 
                 except Exception as e:
-                    print(f"[HEARTBEAT] Failed to reach {peer}: {e}")
+                    log_msg = f"[HEARTBEAT] Failed to reach {peer}: {e}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                     self.peers[peer]["is_alive"] = False
 
-    def handle_heartbeat(self, req: HeartBeatRequest):
+    async def handle_heartbeat(self, req: HeartBeatRequest):
         timestamp = str(datetime.now(timezone.utc).timestamp())
 
         if self.curr_role == NODE_ROLES["LEADER"] and req.node_id == self.rootkeeper:
@@ -278,8 +302,7 @@ class RaftNode:
 
         return HeartBeatResponse(ack=False, timestamp=timestamp)
 
-
-    def mark_dead(self, leader_id):
+    async def mark_dead(self, leader_id):
         # only leader
         try:
             if leader_id not in self.peers:
@@ -288,15 +311,19 @@ class RaftNode:
             self.peers[leader_id]["role"] = None
             self.current_leader = None
         except Exception as e:
-            print(f"[PEER] Failed to mark peer as dead: {e}")
+            log_msg = f"[PEER] Failed to mark peer as dead: {e}"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
-    def set_rootkeeper(self, node_id):
+    async def set_rootkeeper(self, node_id):
         self.rootkeeper = node_id
 
-    def add_peer(self, node_id, role, peer_url):
+    async def add_peer(self, node_id, role, peer_url):
         try:
             if node_id in self.peers:
-                print(f"[PEER] Peer {node_id} already exists")
+                log_msg = f"[PEER] Peer {node_id} already exists"
+                
+                await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                 return
 
             timestamp = datetime.now(timezone.utc).timestamp()
@@ -308,19 +335,25 @@ class RaftNode:
                 "role": role
             }
 
-            print("new_node: ", self.peers[node_id])
+            log_msg = f"new_node: {self.peers[node_id]}"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
         except Exception as e:
-            print(f"[PEER] Failed to add peer: {e}")
+            log_msg = f"[PEER] Failed to add peer: {e}"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
-    def remove_peer(self, node_id):
+    async def remove_peer(self, node_id):
         try:
             if node_id not in self.peers:
                 raise Exception("Node not found")
             del self.peers[node_id]
 
         except Exception as e:
-            print(f"[PEER] Failed to remove peer: {e}")
+            log_msg = f"[PEER] Failed to remove peer: {e}"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
     
     async def election_timeout_loop(self):
         while True:
@@ -335,7 +368,10 @@ class RaftNode:
                  self.peers.get(self.current_leader, None) is None or
                  self.peers.get(self.current_leader, None).get("is_alive", None) is None):
 
-                print(f"[TIMEOUT] Node {self.node_id} starting election for term {self.current_term + 1}")
+                log_msg = f"[TIMEOUT] Node {self.node_id} starting election for term {self.current_term + 1}"
+                
+                await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
+
                 await self.become_candidate()
 
                 # add buffer to avoid back-to-back elections
@@ -356,13 +392,20 @@ class RaftNode:
                 last_seen = float(self.peers[self.current_leader].get("last_seen", 0))
                 delta_secs = curr_timestamp - last_seen
 
-                print(f"[CHECK] Leader: {self.current_leader}, Last Seen: {delta_secs:.2f}s ago")
+                log_msg = f"[CHECK] Leader: {self.current_leader}, Last Seen: {delta_secs:.2f}s ago"
+                
+                await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
                 if delta_secs > self.max_wait:
-                    print(f"[TIMEOUT] Leader Node {self.current_leader} marked as dead")
-                    self.mark_dead(self.current_leader)
+                    log_msg = f"[TIMEOUT] Leader Node {self.current_leader} marked as dead"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
+
+                    await self.mark_dead(self.current_leader)
             except Exception as e:
-                print(f"[ERROR] Heartbeat timeout check failed: {e}")
+                log_msg = f"[ERROR] Heartbeat timeout check failed: {e}"
+                
+                await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
     async def heartbeat_loop(self):
         while True:
@@ -377,12 +420,12 @@ class RaftNode:
             await asyncio.sleep(5)
             await self.send_heartbeats()
 
-    def get_cluster_state(self):
+    async def get_cluster_state(self):
         live_node_count = 0
         for peer,state in self.peers.items():
             if state["is_alive"] is True:
                 live_node_count += 1
-        print(self.peers)
+
         return {
             "leader_id": self.current_leader,
             "node_id": self.node_id,
@@ -432,10 +475,14 @@ class RaftNode:
                     if data["success"]:
                         success_count += 1
                 except Exception as e:
-                    print(f"[LOG REPL] Failed to replicate to {peer_id}: {e}")
+                    log_msg = f"[LOG REPL] Failed to replicate to {peer_id}: {e}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
         if success_count > len(self.peers) // 2:
-            print(f"[COMMIT] Majority ack for {entry.command['type']} {entry.command['key']}")
+            log_msg = f"[COMMIT] Majority ack for {entry.command['type']} {entry.command['key']}"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
             commit_entry = LogEntry(
                 term=self.current_term,
@@ -467,11 +514,15 @@ class RaftNode:
                     )
                     await client.post(f"{peer['peer_url']}/append-entries", json=req.model_dump())
                 except Exception as e:
-                    print(f"[COMMIT REPLICATE] {peer_id} failed: {e}")
+                    log_msg = f"[COMMIT REPLICATE] {peer_id} failed: {e}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
     async def fetch_full_log_from_leader(self):
         if not self.current_leader:
-            print("[SYNC] Skipping sync — no known leader.")
+            log_msg = "[SYNC] Skipping sync — no known leader."
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
             return
 
         if self.curr_role == NODE_ROLES["ROOTKEEPER"]:
@@ -483,15 +534,19 @@ class RaftNode:
                 resp = await client.get(f"{leader_url}/sync-entries")
 
                 if resp.status_code != 200:
-                    print(f"[SYNC] Failed with status {resp.status_code}: {resp.text}")
+                    log_msg = f"[SYNC] Failed with status {resp.status_code}: {resp.text}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                     return
 
                 data = resp.json()
                 req = AppendEntriesRequest(**data)
-                self.handle_append_entries(req)
+                await self.handle_append_entries(req)
 
             except Exception as e:
-                print(f"[SYNC] Failed to sync from leader: {e}")
+                log_msg = f"[SYNC] Failed to sync from leader: {e}"
+                
+                await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
     async def check_leadership_consensus(self):
         leader_map = Counter()
@@ -505,18 +560,27 @@ class RaftNode:
                     if reported_leader:
                         leader_map[reported_leader]+=1
                 except Exception as e:
-                    print(f"[LEADER_CONSENSUS] Failed to reach {peer}: {e}")
+                    log_msg = f"[LEADER_CONSENSUS] Failed to reach {peer}: {e}"
+                    
+                    await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
                     self.peers[peer]["is_alive"] = False
 
-        print("Leader vote counts:", leader_map)
+        log_msg = f"Leader vote counts:{leader_map}"
+        
+        await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
 
         if not leader_map:
-            print("[CONSENSUS] No leader reported by peers.")
+            log_msg = "[CONSENSUS] No leader reported by peers."
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
             return await self.force_priority_election()
     
         consensus_leader, count = leader_map.most_common(1)[0]
         if count > len(self.peers) // 2:
-            print(f"[CONSENSUS] Consensus leader: {consensus_leader} with {count} votes")
+            log_msg = f"[CONSENSUS] Consensus leader: {consensus_leader} with {count} votes"
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
+
             self.current_leader = consensus_leader
             for peer, val in self.peers.items():
                 if val["role"] == NODE_ROLES["ROOTKEEPER"]:
@@ -526,11 +590,15 @@ class RaftNode:
                 if self.node_id != consensus_leader:
                     self.curr_role = NODE_ROLES["FOLLOWER"]
         else:
-            print("[CONSENSUS] No majority found. Starting priority election.")
+            log_msg = "[CONSENSUS] No majority found. Starting priority election."
+            
+            await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
             await self.force_priority_election()
 
     async def force_priority_election(self):
-        print("[PRIORITY ELECTION] Triggered due to lack of consensus.")
+        log_msg = "[PRIORITY ELECTION] Triggered due to lack of consensus."
+        
+        await self.logger.log(KAFKA_TOPICS["RAFT_TOPIC"],log_msg)
         await self.become_candidate()
     
     async def consensus_monitor_loop(self):
@@ -539,7 +607,7 @@ class RaftNode:
             if self.curr_role != NODE_ROLES["ROOTKEEPER"]:
                 await self.check_leadership_consensus()
 
-    def get_leader(self):
+    async def get_leader(self):
         return LeaderConsensusResponse(leader_id=self.current_leader,
                                        reported_by=self.node_id,
                                        reported_at=datetime.now(timezone.utc).timestamp())
