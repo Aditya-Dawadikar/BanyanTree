@@ -3,3 +3,4 @@ uvicorn
 httpx
 pydantic
 aiokafka
+elasticsearch==8.11.1

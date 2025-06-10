@@ -1,8 +1,10 @@
 import asyncio
 from aiokafka import AIOKafkaConsumer
 from datetime import datetime
+from elasticsearch import Elasticsearch
 
-async def consume_logs():
+
+async def consume_logs(es: Elasticsearch):
     consumer = AIOKafkaConsumer(
         "raft-logs", "store-logs",
         bootstrap_servers="localhost:9093",
@@ -16,8 +18,19 @@ async def consume_logs():
         print("[INFO] Kafka consumer started and awaiting messages...")
 
         async for msg in consumer:
-            timestamp = datetime.fromtimestamp(msg.timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = datetime.fromtimestamp(msg.timestamp / 1000).isoformat() + "Z"
             print(f"[TOPIC: {msg.topic}]({timestamp}) {msg.value.decode('utf-8')}")
+
+            log_entry = {
+                "timestamp": timestamp,
+                "topic": msg.topic,
+                "message": msg.value.decode('utf-8')
+            }
+
+            index_name = msg.topic
+            es.index(index=index_name, document=log_entry)
+
+            print(f"[ES] Indexed log into {index_name}: {log_entry}")
 
     except asyncio.CancelledError:
         print("Kafka consumer received cancellation signal")

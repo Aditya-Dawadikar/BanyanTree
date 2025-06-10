@@ -5,6 +5,11 @@ from contextlib import asynccontextmanager
 from typing import List
 from routes import get_cluster_router
 from consumer import consume_logs
+from elasticsearch import Elasticsearch
+
+es = Elasticsearch("http://localhost:9200",
+                   headers={"Accept": "application/vnd.elasticsearch+json; compatible-with=8",
+                    "Content-Type": "application/vnd.elasticsearch+json; compatible-with=8"})
 
 class BackgroundTaskManager:
     def __init__(self):
@@ -28,7 +33,7 @@ task_manager = BackgroundTaskManager()
 async def lifespan(app: FastAPI):
     # Startup
     print("[STARTUP] Initializing background tasks...")
-    task_manager.add_task(asyncio.create_task(consume_logs()))
+    task_manager.add_task(asyncio.create_task(consume_logs(es)))
     
     yield
     
@@ -39,7 +44,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-app.include_router(get_cluster_router(),
+app.include_router(get_cluster_router(es),
                    prefix="/cluster")
 
 if __name__=="__main__":
