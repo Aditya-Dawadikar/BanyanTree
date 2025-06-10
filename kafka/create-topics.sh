@@ -1,25 +1,42 @@
 #!/bin/bash
 
-# Define broker and topics
 KAFKA_BROKER="kafka:9092"
-TOPICS=("raft-logs" "store-logs")  # Correct bash array syntax
+TOPICS=("raft-logs" "store-logs")
+RETENTION_MS="1800000"  # 30 minutes
+PARTITIONS=3
+REPLICATION_FACTOR=1
 
-# Wait until Kafka is up
-echo "Waiting for Kafka to be ready..."
-while ! kafka-topics --list --bootstrap-server $KAFKA_BROKER &>/dev/null; do   
+# Wait until Kafka is ready
+echo "Waiting for Kafka at $KAFKA_BROKER..."
+for i in {1..30}; do
+  kafka-topics --list --bootstrap-server "$KAFKA_BROKER" &>/dev/null && break
+  echo "Kafka not ready, retrying ($i/30)..."
   sleep 2
 done
 
-echo "Kafka is up!"
+if [ $i -eq 30 ]; then
+  echo "Kafka not reachable after 30 attempts. Exiting."
+  exit 1
+fi
+echo "Kafka is ready."
 
-# Create topics if they don't exist
+# Ensure topics exist and have correct config
 for TOPIC in "${TOPICS[@]}"; do
-  echo "Checking if topic '$TOPIC' exists..."
-  if kafka-topics --list --bootstrap-server $KAFKA_BROKER | grep -qw "$TOPIC"; then
-      echo "Topic '$TOPIC' already exists"
+  echo "Checking topic: $TOPIC"
+  if kafka-topics --list --bootstrap-server "$KAFKA_BROKER" | grep -qw "$TOPIC"; then
+    echo "Topic '$TOPIC' exists. Updating retention.ms..."
+    kafka-configs --alter --topic "$TOPIC" --bootstrap-server "$KAFKA_BROKER" \
+      --add-config "retention.ms=$RETENTION_MS"
   else
-      echo "Creating topic: $TOPIC"
-      kafka-topics --create --topic $TOPIC --bootstrap-server $KAFKA_BROKER --partitions 3 --replication-factor 1
-      echo "Topic $TOPIC created."
+    echo "Creating topic '$TOPIC'..."
+    kafka-topics --create \
+      --topic "$TOPIC" \
+      --bootstrap-server "$KAFKA_BROKER" \
+      --partitions "$PARTITIONS" \
+      --replication-factor "$REPLICATION_FACTOR" \
+      --config "retention.ms=$RETENTION_MS"
   fi
 done
+
+echo "Topic setup complete."
+exit 0

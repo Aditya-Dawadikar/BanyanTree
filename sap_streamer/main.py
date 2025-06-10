@@ -2,9 +2,11 @@ import uvicorn
 from fastapi import FastAPI
 import asyncio
 from aiokafka import AIOKafkaConsumer
-from datetime import datetime
+from aiokafka.helpers import create_ssl_context
+from aiokafka.structs import TopicPartition
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import List
 
 class BackgroundTaskManager:
     def __init__(self):
@@ -46,14 +48,18 @@ async def consume_raft_logs():
         "raft-logs", "store-logs",
         bootstrap_servers="localhost:9093",
         group_id="sap_streamer_group",
-        enable_auto_commit=False
+        enable_auto_commit=True,
+        auto_offset_reset="latest"  # or "earliest" if you want to start from the beginning
     )
 
     try:
         await consumer.start()
+        print("[INFO] Kafka consumer started and awaiting messages...")
+
         async for msg in consumer:
-            timestamp = datetime.fromtimestamp(msg.timestamp/1000).strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = datetime.fromtimestamp(msg.timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
             print(f"[TOPIC: {msg.topic}]({timestamp}) {msg.value.decode('utf-8')}")
+
     except asyncio.CancelledError:
         print("Kafka consumer received cancellation signal")
     except Exception as e:
@@ -62,6 +68,7 @@ async def consume_raft_logs():
         print("Stopping Kafka consumer...")
         await consumer.stop()
         print("Kafka consumer stopped")
+
 
 # Example additional background task
 # async def other_background_task():
