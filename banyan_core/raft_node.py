@@ -10,9 +10,11 @@ from models import (RequestVoteRequest,
                     HeartBeatRequest,
                     HeartBeatResponse,
                     LeaderAnnouncementRequest,
-                    LeaderAnnouncementResponse)
+                    LeaderAnnouncementResponse,
+                    LeaderConsensusResponse)
 from store import Store
 import random
+from collections import Counter
 
 
 
@@ -41,13 +43,22 @@ class RaftNode:
         self.max_wait = 15 # 15 secs wait before marking node dead
 
         self.is_election = False
+
+        self.rootkeeper = None
     
     def handle_request_vote(self, req: RequestVoteRequest):
+        if self.curr_role == NODE_ROLES["ROOTKEEPER"]:
+            return RequestVoteResponse(
+                    vote_granted=False,
+                    term = self.current_term
+                )
+
         # Step 1: if candidates term is less than my current term,
         # reject vote
         self.is_election = True
         if req.term < self.current_term:
-            return RequestVoteResponse(vote_granted=False, term=self.current_term)
+            return RequestVoteResponse(vote_granted=False,
+                                       term=self.current_term)
 
         # Step 2: If candidates term is greater than my current term,
         # update my term and become follower
@@ -117,18 +128,28 @@ class RaftNode:
                         self.peers[peer]["last_seen"] = str(datetime.now(timezone.utc).timestamp())
 
                     # may be mark as alive?
-                    if data["ack"] is True:
-                        ack_count += 1
+                    if self.peers[peer]["role"] != NODE_ROLES["ROOTKEEPER"]:
+                        if data["ack"] is True:
+                            ack_count += 1
 
                 except Exception as e:
                     print(f"[LEADER_ACK] Failed to reach {peer}: {e}")
 
-        if ack_count > len(self.peers)//2:
+        valid_voter_count = 0
+        for voter in self.peers:
+            if self.peers[voter]["role"] != NODE_ROLES["ROOTKEEPER"]:
+                # this is a valid voter
+                valid_voter_count+=1
+        
+        majority = (valid_voter_count + 1)//2
+
+        if ack_count > majority:
             # declare self as leader
             self.curr_role = NODE_ROLES["LEADER"]
             # mark others as followers
             for peer in self.peers:
-                self.peers[peer]["role"] = NODE_ROLES["FOLLOWER"]
+                if self.peers[peer]["role"] != NODE_ROLES["ROOTKEEPER"]:
+                    self.peers[peer]["role"] = NODE_ROLES["FOLLOWER"]
             
             self.is_election = False
 
@@ -152,21 +173,33 @@ class RaftNode:
         self.is_election = True
         async with AsyncClient() as client:
             for peer, val in self.peers.items():
-                try:
-                    resp = await client.post(f"{val['peer_url']}/request-vote", json=req.dict())
-                    data = resp.json()
-                    if data.get("vote_granted"):
-                        self.votes_received += 1
-                        print(f"[VOTE] {peer} voted")
-                    else:
-                        print(f"[VOTE] {peer} rejected vote")
-                except Exception as e:
-                    print(f"[CANDIDATE] Failed to reach {peer}: {e}")
+                if val["role"] == NODE_ROLES["ROOTKEEPER"]:
+                    continue
+                else:
+                    try:
+                        resp = await client.post(f"{val['peer_url']}/request-vote", json=req.dict())
+                        data = resp.json()
+                        if data.get("vote_granted") is True:
+                            self.votes_received += 1
+                            print(f"[VOTE] {peer} voted")
+                        else:
+                            print(f"[VOTE] {peer} rejected vote")
+                    except Exception as e:
+                        print(f"[CANDIDATE] Failed to reach {peer}: {e}")
 
-        if self.votes_received > len(self.peers) // 2:
+        valid_voter_count = 0
+        for voter in self.peers:
+            if self.peers[voter]["role"] != NODE_ROLES["ROOTKEEPER"]:
+                # this is a valid voter
+                valid_voter_count+=1
+        
+        majority = (valid_voter_count + 1)//2
+
+        if self.votes_received >= majority:
             await self.become_leader()
 
     def handle_leader_ack(self, req: LeaderAnnouncementRequest):
+        print(f"[LEADER_ANNOUNCE] Received from {req.leader_id} at node {self.node_id}")
         self.current_leader = req.leader_id
         self.voted_for = None
         self.is_election = False
@@ -175,8 +208,15 @@ class RaftNode:
             self.peers[req.leader_id]["role"] = NODE_ROLES["LEADER"]
             self.peers[req.leader_id]["last_seen"] = str(datetime.now(timezone.utc).timestamp())
 
+            # mark all other nodes as followers
+            for peer in self.peers:
+                if self.peers[peer]["role"] not in [NODE_ROLES["LEADER"], NODE_ROLES["ROOTKEEPER"]]:
+                    self.peers[peer]["role"] = NODE_ROLES["FOLLOWER"]
+    
             # fetch log
-            asyncio.create_task(self.fetch_full_log_from_leader())
+            if self.node_id != req.leader_id and self.curr_role != NODE_ROLES["ROOTKEEPER"]:
+                self.curr_role = NODE_ROLES["FOLLOWER"]
+                asyncio.create_task(self.fetch_full_log_from_leader())
 
         return LeaderAnnouncementResponse(
             ack=True,
@@ -196,7 +236,10 @@ class RaftNode:
                     resp = await client.post(f"""{val["peer_url"]}/ping""", json=req.dict())
                     data = resp.json()
 
-                    if data.get("ack", False):
+                    print("++++++++++++++++++++++++")
+                    print("[PING ACK] ",peer, data)
+
+                    if data.get("ack", None):
                         self.peers[peer]["is_alive"] = True
                     else:
                         self.peers[peer]["is_alive"] = False
@@ -208,24 +251,33 @@ class RaftNode:
     def handle_heartbeat(self, req: HeartBeatRequest):
         timestamp = str(datetime.now(timezone.utc).timestamp())
 
-        # Accept heartbeat from any peer and update current_leader if needed
-        if self.current_leader is None:
-            self.current_leader = req.node_id
-            asyncio.create_task(self.fetch_full_log_from_leader())
-
-        if req.node_id == self.current_leader and req.node_id in self.peers:
-            was_dead = not self.peers[req.node_id].get("is_alive", False)
-
-            self.peers[req.node_id]["is_alive"] = True
-            self.peers[req.node_id]["last_seen"] = timestamp
-
-            if was_dead:
-                print(f"[SYNC] Detected reconnection to leader {req.node_id}, syncing log")
-                asyncio.create_task(self.fetch_full_log_from_leader())
-
+        if self.curr_role == NODE_ROLES["LEADER"] and req.node_id == self.rootkeeper:
             return HeartBeatResponse(ack=True, timestamp=timestamp)
 
+        elif self.curr_role == NODE_ROLES["ROOTKEEPER"] and req.node_id == self.current_leader:
+            # Rootkeeper receives heartbeat from leader
+            if req.node_id in self.peers:
+                self.peers[req.node_id]["is_alive"] = True
+                self.peers[req.node_id]["last_seen"] = timestamp
+            return HeartBeatResponse(ack=True, timestamp=timestamp)
+
+        elif self.curr_role not in [NODE_ROLES["ROOTKEEPER"], NODE_ROLES["LEADER"]]:
+            if req.node_id in [self.rootkeeper, self.current_leader]:
+
+                if self.current_leader is None and self.rootkeeper != req.node_id:
+                    self.current_leader = req.node_id
+                    if self.node_id != req.node_id:
+                        self.curr_role = NODE_ROLES["FOLLOWER"]
+                    asyncio.create_task(self.fetch_full_log_from_leader())
+
+                if req.node_id in self.peers:
+                    self.peers[req.node_id]["is_alive"] = True
+                    self.peers[req.node_id]["last_seen"] = timestamp
+
+                return HeartBeatResponse(ack=True, timestamp=timestamp)
+
         return HeartBeatResponse(ack=False, timestamp=timestamp)
+
 
     def mark_dead(self, leader_id):
         # only leader
@@ -237,6 +289,9 @@ class RaftNode:
             self.current_leader = None
         except Exception as e:
             print(f"[PEER] Failed to mark peer as dead: {e}")
+
+    def set_rootkeeper(self, node_id):
+        self.rootkeeper = node_id
 
     def add_peer(self, node_id, role, peer_url):
         try:
@@ -272,32 +327,43 @@ class RaftNode:
             timeout = random.uniform(5, 20)
             await asyncio.sleep(timeout)
 
-            if self.curr_role != NODE_ROLES["LEADER"] and self.current_leader is None:
+            if self.curr_role == NODE_ROLES["ROOTKEEPER"]:
+                return
+
+            if self.curr_role != NODE_ROLES["LEADER"] and \
+                (self.current_leader is None or
+                 self.peers.get(self.current_leader, None) is None or
+                 self.peers.get(self.current_leader, None).get("is_alive", None) is None):
+
                 print(f"[TIMEOUT] Node {self.node_id} starting election for term {self.current_term + 1}")
                 await self.become_candidate()
+
                 # add buffer to avoid back-to-back elections
                 await asyncio.sleep(5)
 
     async def heartbeat_timeout_loop(self):
         while True:
-            timeout = 5
-            await asyncio.sleep(timeout)
-
+            await asyncio.sleep(5)
+           
             if self.curr_role == NODE_ROLES["LEADER"]:
-                continue
+                continue  # Leaders don’t track leaders
 
-            curr_timestamp = datetime.now(timezone.utc).timestamp()
+            if not self.current_leader or self.current_leader not in self.peers:
+                continue  # No valid leader to check against
 
-            if self.current_leader and self.current_leader in self.peers:
-                last_seen = float(self.peers[self.current_leader]["last_seen"])
+            try:
+                curr_timestamp = datetime.now(timezone.utc).timestamp()
+                last_seen = float(self.peers[self.current_leader].get("last_seen", 0))
                 delta_secs = curr_timestamp - last_seen
 
-                print(self.current_leader, delta_secs)
+                print(f"[CHECK] Leader: {self.current_leader}, Last Seen: {delta_secs:.2f}s ago")
+
                 if delta_secs > self.max_wait:
-                    # mark node as dead
                     print(f"[TIMEOUT] Leader Node {self.current_leader} marked as dead")
                     self.mark_dead(self.current_leader)
-    
+            except Exception as e:
+                print(f"[ERROR] Heartbeat timeout check failed: {e}")
+
     async def heartbeat_loop(self):
         while True:
             timeout = 5
@@ -305,6 +371,11 @@ class RaftNode:
 
             if self.curr_role == NODE_ROLES["LEADER"]:
                 await self.send_heartbeats()
+
+    async def rootkeeper_loop(self):
+        while self.curr_role == NODE_ROLES["ROOTKEEPER"]:
+            await asyncio.sleep(5)
+            await self.send_heartbeats()
 
     def get_cluster_state(self):
         live_node_count = 0
@@ -344,6 +415,9 @@ class RaftNode:
         success_count = 1  # include self
         async with AsyncClient() as client:
             for peer_id, peer in self.peers.items():
+                if peer["role"] == NODE_ROLES["ROOTKEEPER"]:
+                    continue
+
                 try:
                     req = AppendEntriesRequest(
                         term=self.current_term,
@@ -380,6 +454,8 @@ class RaftNode:
     async def replicate_commit(self, commit_entry: LogEntry):
         async with AsyncClient() as client:
             for peer_id, peer in self.peers.items():
+                if peer["role"] == NODE_ROLES["ROOTKEEPER"]:
+                    continue
                 try:
                     req = AppendEntriesRequest(
                         term=self.current_term,
@@ -395,14 +471,75 @@ class RaftNode:
 
     async def fetch_full_log_from_leader(self):
         if not self.current_leader:
+            print("[SYNC] Skipping sync — no known leader.")
+            return
+
+        if self.curr_role == NODE_ROLES["ROOTKEEPER"]:
             return
 
         leader_url = self.peers[self.current_leader]["peer_url"]
         async with AsyncClient() as client:
             try:
                 resp = await client.get(f"{leader_url}/sync-entries")
+
+                if resp.status_code != 200:
+                    print(f"[SYNC] Failed with status {resp.status_code}: {resp.text}")
+                    return
+
                 data = resp.json()
                 req = AppendEntriesRequest(**data)
                 self.handle_append_entries(req)
+
             except Exception as e:
                 print(f"[SYNC] Failed to sync from leader: {e}")
+
+    async def check_leadership_consensus(self):
+        leader_map = Counter()
+        async with AsyncClient() as client:
+            for peer,val in self.peers.items():
+                try:
+                    resp = await client.get(f"""{val["peer_url"]}/leader-consensus""")
+                    data = resp.json()
+
+                    reported_leader = data.get("leader_id")
+                    if reported_leader:
+                        leader_map[reported_leader]+=1
+                except Exception as e:
+                    print(f"[LEADER_CONSENSUS] Failed to reach {peer}: {e}")
+                    self.peers[peer]["is_alive"] = False
+
+        print("Leader vote counts:", leader_map)
+
+        if not leader_map:
+            print("[CONSENSUS] No leader reported by peers.")
+            return await self.force_priority_election()
+    
+        consensus_leader, count = leader_map.most_common(1)[0]
+        if count > len(self.peers) // 2:
+            print(f"[CONSENSUS] Consensus leader: {consensus_leader} with {count} votes")
+            self.current_leader = consensus_leader
+            for peer, val in self.peers.items():
+                if val["role"] == NODE_ROLES["ROOTKEEPER"]:
+                    continue
+                val["role"] = NODE_ROLES["LEADER"] if peer == consensus_leader else NODE_ROLES["FOLLOWER"]
+
+                if self.node_id != consensus_leader:
+                    self.curr_role = NODE_ROLES["FOLLOWER"]
+        else:
+            print("[CONSENSUS] No majority found. Starting priority election.")
+            await self.force_priority_election()
+
+    async def force_priority_election(self):
+        print("[PRIORITY ELECTION] Triggered due to lack of consensus.")
+        await self.become_candidate()
+    
+    async def consensus_monitor_loop(self):
+        while True:
+            await asyncio.sleep(15)  # tune frequency
+            if self.curr_role != NODE_ROLES["ROOTKEEPER"]:
+                await self.check_leadership_consensus()
+
+    def get_leader(self):
+        return LeaderConsensusResponse(leader_id=self.current_leader,
+                                       reported_by=self.node_id,
+                                       reported_at=datetime.now(timezone.utc).timestamp())

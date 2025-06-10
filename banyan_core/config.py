@@ -1,7 +1,8 @@
 NODE_ROLES = {
-    "LEADER": 0,
-    "FOLLOWER": 1,
-    "CANDIDATE": 2
+        "ROOTKEEPER": 0,
+        "LEADER": 1,
+        "FOLLOWER": 2,
+        "CANDIDATE": 3,
 }
 
 RECORD_STATUS = {

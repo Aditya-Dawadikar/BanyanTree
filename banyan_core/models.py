@@ -62,3 +62,8 @@ class GetRecordResponse(BaseModel):
     created_at: float
     last_updated_at: float
     last_committed_at: Optional[float]
+
+class LeaderConsensusResponse(BaseModel):
+    leader_id: Optional[str]
+    reported_by: str
+    reported_at: float

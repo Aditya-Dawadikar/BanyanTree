@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from raft_node import RaftNode
 from controllers.raft_controller import create_controller
 from models import *
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from config import NODE_ROLES
 
 def get_router_with_node(node: RaftNode):
@@ -24,8 +24,14 @@ def get_router_with_node(node: RaftNode):
     
     @router.get("/sync-entries", response_model=AppendEntriesRequest)
     async def sync_entries():
+        print(f"received sync entries msg")
+
         if node.curr_role != NODE_ROLES["LEADER"]:
+            if not node.current_leader or node.current_leader not in node.peers:
+                return JSONResponse(status_code=503, content={"error": "No known leader to sync from."})
+            
             return RedirectResponse(url=f"{node.peers[node.current_leader]['peer_url']}/sync-entries")
+
 
         return AppendEntriesRequest(
             term=node.current_term,
@@ -38,12 +44,14 @@ def get_router_with_node(node: RaftNode):
     
     @router.get("/cluster-state")
     async def cluster_state():
-        if node.curr_role != NODE_ROLES["LEADER"]:
-            return RedirectResponse(url = f"""{node.peers[node.current_leader]["peer_url"]}/cluster-state""")
         return node.get_cluster_state()
 
     @router.post("/leader-announcement", response_model = LeaderAnnouncementResponse)
     async def leader_announcement_ack(req: LeaderAnnouncementRequest):
         return node.handle_leader_ack(req)
+
+    @router.get("/leader-consensus", response_model = LeaderConsensusResponse)
+    async def get_leader_consesnsus():
+        return node.get_leader()
 
     return router
