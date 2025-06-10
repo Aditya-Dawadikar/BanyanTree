@@ -1,12 +1,15 @@
 import uvicorn
 from fastapi import FastAPI
 import asyncio
-from aiokafka import AIOKafkaConsumer
-from aiokafka.helpers import create_ssl_context
-from aiokafka.structs import TopicPartition
-from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List
+from routes import get_cluster_router
+from consumer import consume_logs
+from elasticsearch import Elasticsearch
+
+es = Elasticsearch("http://localhost:9200",
+                   headers={"Accept": "application/vnd.elasticsearch+json; compatible-with=8",
+                    "Content-Type": "application/vnd.elasticsearch+json; compatible-with=8"})
 
 class BackgroundTaskManager:
     def __init__(self):
@@ -30,9 +33,7 @@ task_manager = BackgroundTaskManager()
 async def lifespan(app: FastAPI):
     # Startup
     print("[STARTUP] Initializing background tasks...")
-    task_manager.add_task(asyncio.create_task(consume_raft_logs()))
-    # Add more tasks here as needed
-    # task_manager.add_task(asyncio.create_task(other_background_task()))
+    task_manager.add_task(asyncio.create_task(consume_logs(es)))
     
     yield
     
@@ -43,41 +44,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-async def consume_raft_logs():
-    consumer = AIOKafkaConsumer(
-        "raft-logs", "store-logs",
-        bootstrap_servers="localhost:9093",
-        group_id="sap_streamer_group",
-        enable_auto_commit=True,
-        auto_offset_reset="latest"  # or "earliest" if you want to start from the beginning
-    )
-
-    try:
-        await consumer.start()
-        print("[INFO] Kafka consumer started and awaiting messages...")
-
-        async for msg in consumer:
-            timestamp = datetime.fromtimestamp(msg.timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            print(f"[TOPIC: {msg.topic}]({timestamp}) {msg.value.decode('utf-8')}")
-
-    except asyncio.CancelledError:
-        print("Kafka consumer received cancellation signal")
-    except Exception as e:
-        print(f"Error in Kafka consumer: {str(e)}")
-    finally:
-        print("Stopping Kafka consumer...")
-        await consumer.stop()
-        print("Kafka consumer stopped")
-
-
-# Example additional background task
-# async def other_background_task():
-#     try:
-#         while True:
-#             print("Background task running...")
-#             await asyncio.sleep(5)
-#     except asyncio.CancelledError:
-#         print("Background task cancelled")
+app.include_router(get_cluster_router(es),
+                   prefix="/cluster")
 
 if __name__=="__main__":
     uvicorn.run("main:app",
