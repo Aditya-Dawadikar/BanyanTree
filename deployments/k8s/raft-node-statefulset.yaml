@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: raft-node
+spec:
+  serviceName: "raft-node"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: raft-node
+  template:
+    metadata:
+      labels:
+        app: raft-node
+    spec:
+      terminationGracePeriodSeconds: 10
+      imagePullSecrets:
+        - name: ecr-creds
+      containers:
+        - name: raft-node
+          image: 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:raft-node
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_PORT
+              value: "8000"
+          volumeMounts:
+            - name: raft-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: raft-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

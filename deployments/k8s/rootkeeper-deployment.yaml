@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rootkeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rootkeeper
+  template:
+    metadata:
+      labels:
+        app: rootkeeper
+    spec:
+      imagePullSecrets:
+        - name: ecr-creds
+      containers:
+        - name: rootkeeper
+          image: 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:rootkeeper
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: NODE_ROLE
+              value: ROOTKEEPER
+            - name: NODE_ID
+              value: node0
+            - name: NODE_PORT
+              value: "8000"

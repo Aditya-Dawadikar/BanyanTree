@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-kafka-topics
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-topic-init
+          image: confluentinc/cp-kafka:7.4.4
+          command: ["/bin/bash", "/scripts/create-topics.sh"]
+          volumeMounts:
+            - name: script-volume
+              mountPath: /scripts
+      volumes:
+        - name: script-volume
+          configMap:
+            name: kafka-init-scripts
+            defaultMode: 0755

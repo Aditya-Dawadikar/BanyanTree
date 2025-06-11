@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sap-streamer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sap-streamer
+  template:
+    metadata:
+      labels:
+        app: sap-streamer
+    spec:
+      imagePullSecrets:
+        - name: ecr-creds
+      containers:
+        - name: sap-streamer
+          image: 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:sap-streamer
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9093
+            - name: ELASTICSEARCH_HOST
+              value: http://elasticsearch:9200
