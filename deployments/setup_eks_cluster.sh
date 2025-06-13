@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 echo "========================================================="
 echo "                KUBECTL CHECK/INSTALL"
@@ -141,29 +141,79 @@ eksctl create cluster \
   --with-oidc \
   --tags "env=dev,project=banyantree"
 
-echo "Cluster creation complete."
 
-# Wait for nodes to be Ready
-echo "Waiting for all nodes to become Ready..."
+echo "Waiting for nodes to be ready..."
 while [[ $(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready") -lt $MIN_NODES ]]; do
   sleep 10
-  echo "...still waiting on nodes to be Ready"
+  echo "...still waiting on nodes"
 done
-echo "All nodes are Ready."
 
-# Wait for all system pods to be Running
-echo "Waiting for all system pods to be Running..."
-while kubectl get pods -n kube-system --no-headers 2>/dev/null | grep -vE 'Running|Completed' > /dev/null; do
+echo "========================================================="
+echo "          SETUP IAM ROLE FOR EBS CSI DRIVER"
+echo "========================================================="
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+OIDC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query "cluster.identity.oidc.issuer" --output text | cut -d '/' -f5)
+
+cat > trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::$ACCOUNT_ID:oidc-provider/oidc.eks.$REGION.amazonaws.com/id/$OIDC_ID"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.$REGION.amazonaws.com/id/$OIDC_ID:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+ROLE_NAME="AmazonEKS_EBS_CSI_DriverRole"
+
+
+if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+  echo "Creating IAM role: $ROLE_NAME"
+  aws iam create-role \
+    --role-name "$ROLE_NAME" \
+    --assume-role-policy-document file://trust-policy.json
+else
+  echo "IAM role $ROLE_NAME already exists."
+fi
+
+
+aws iam attach-role-policy \
+  --role-name $ROLE_NAME \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+
+echo "========================================================="
+echo "      INSTALL EBS CSI DRIVER ADDON ON THE CLUSTER"
+echo "========================================================="
+
+aws eks create-addon \
+  --cluster-name "$CLUSTER_NAME" \
+  --region "$REGION" \
+  --addon-name aws-ebs-csi-driver \
+  --service-account-role-arn arn:aws:iam::$ACCOUNT_ID:role/$ROLE_NAME \
+  --resolve-conflicts OVERWRITE || echo "Addon may already exist."
+
+echo "Waiting for EBS CSI driver pods..."
+while kubectl get pods -n kube-system | grep ebs-csi | grep -vE 'Running|Completed' > /dev/null; do
   sleep 10
-  echo "...still waiting on system pods"
+  echo "...waiting on EBS CSI driver to be ready"
 done
-echo "All system pods are Running."
+
+echo "✅ Cluster ready for StatefulSet PVCs"
+
+rm -f trust-policy.json
 
 echo "Cluster info:"
 aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query "cluster.status"
-
-echo "Verifying cluster nodes:"
 kubectl get nodes
-
-echo "Verifying system pods:"
-kubectl get pods --all-namespaces
+kubectl get pods -n kube-system
