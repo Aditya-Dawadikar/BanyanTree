@@ -97,6 +97,23 @@ echo "eksctl installed"
 eksctl version
 
 echo "========================================================="
+echo "       PRE-CLEANUP: DELETE EBS CSI DRIVER ADDON/PODS"
+echo "========================================================="
+
+echo "Checking and deleting EBS CSI addon..."
+if aws eks describe-addon --cluster-name "$CLUSTER_NAME" --addon-name aws-ebs-csi-driver --region "$REGION" > /dev/null 2>&1; then
+  aws eks delete-addon --cluster-name "$CLUSTER_NAME" --addon-name aws-ebs-csi-driver --region "$REGION"
+  echo "Deleted EBS CSI addon."
+else
+  echo "No EBS CSI addon found."
+fi
+
+echo "Force deleting CSI resources if any..."
+kubectl delete daemonset ebs-csi-node -n kube-system --ignore-not-found
+kubectl delete csidriver ebs.csi.aws.com --ignore-not-found
+kubectl delete sc gp2 ebs-sc --ignore-not-found
+
+echo "========================================================="
 echo "                  NODEGROUP DELETION"
 echo "========================================================="
 
@@ -178,6 +195,29 @@ if aws ecr describe-repositories --repository-names "$REPO_NAME" --region "$REGI
 else
   echo "ECR repository $REPO_NAME not found (already deleted or never created)."
 fi
+
+echo "========================================================="
+echo "                  CLEAN UP EBS CSI DRIVER"
+echo "========================================================="
+
+echo "Deleting EBS CSI driver addon from EKS (if exists)..."
+if aws eks describe-addon --cluster-name "$CLUSTER_NAME" --addon-name aws-ebs-csi-driver --region "$REGION" > /dev/null 2>&1; then
+  aws eks delete-addon --cluster-name "$CLUSTER_NAME" --addon-name aws-ebs-csi-driver --region "$REGION"
+  echo "Deleted EBS CSI driver addon from cluster."
+else
+  echo "No EBS CSI addon found."
+fi
+
+echo "Cleaning up Kubernetes EBS CSI resources..."
+kubectl delete sc gp2 ebs-sc --ignore-not-found
+kubectl delete csidriver ebs.csi.aws.com --ignore-not-found
+kubectl delete daemonset ebs-csi-node -n kube-system --ignore-not-found
+
+# If you know the exact role name
+ROLE_NAME="AmazonEKS_EBS_CSI_DriverRole"
+aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "AmazonEKS_EBS_CSI_Driver_Policy" || true
+aws iam delete-role --role-name "$ROLE_NAME" || true
+
 
 echo "========================================================="
 echo "                  RESIDUAL SERVICE CHECK"
