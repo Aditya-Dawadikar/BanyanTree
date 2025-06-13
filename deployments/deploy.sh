@@ -7,7 +7,7 @@ AWS_REGION="us-east-2"
 
 echo ">> Pulling latest code..."
 cd "$PROJECT_DIR"
-git pull origin main
+git pull origin master
 
 echo ">> Building and pushing Docker images..."
 docker build -t $ECR_REPO:raft-node -f raft-node/Dockerfile raft-node
