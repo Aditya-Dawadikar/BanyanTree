@@ -74,12 +74,12 @@ aws ecr put-lifecycle-policy \
     "rules": [
       {
         "rulePriority": 1,
-        "description": "Expire untagged images older than 6 hours",
+        "description": "Expire untagged images older than 1 day",
         "selection": {
           "tagStatus": "untagged",
           "countType": "sinceImagePushed",
-          "countUnit": "hours",
-          "countNumber": 6
+          "countUnit": "days",
+          "countNumber": 1
         },
         "action": {
           "type": "expire"
