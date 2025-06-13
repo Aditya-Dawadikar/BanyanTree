@@ -21,6 +21,48 @@ wait_for_cluster_deletion() {
     echo "Cluster $CLUSTER_NAME deleted."
 }
 
+delete_cloudformation_stacks() {
+    echo "Cleaning up CloudFormation stacks..."
+    STACKS=$(aws cloudformation describe-stacks --region "$REGION" --query "Stacks[*].StackName" --output text)
+    for stack in $STACKS; do
+        if [[ "$stack" == eksctl-* ]]; then
+            echo "- Deleting stack: $stack"
+            aws cloudformation delete-stack --region "$REGION" --stack-name "$stack"
+        fi
+    done
+
+    for stack in $STACKS; do
+        if [[ "$stack" == eksctl-* ]]; then
+            while aws cloudformation describe-stacks --region "$REGION" --stack-name "$stack" > /dev/null 2>&1; do
+                sleep 10
+                echo "...waiting for stack $stack to delete"
+            done
+            echo "Deleted stack: $stack"
+        fi
+    done
+}
+
+delete_oidc_providers() {
+    echo "Cleaning up OIDC providers..."
+    OIDC_PROVIDERS=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[].Arn" --output text)
+    for oidc in $OIDC_PROVIDERS; do
+        echo "- Deleting OIDC provider: $oidc"
+        aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$oidc"
+    done
+}
+
+delete_orphaned_security_groups() {
+    echo "Cleaning up orphaned security groups..."
+    SGS=$(aws ec2 describe-security-groups --region "$REGION" --query 'SecurityGroups[?GroupName!=`default`].[GroupId]' --output text)
+    for sg in $SGS; do
+        if aws ec2 delete-security-group --region "$REGION" --group-id "$sg" 2>/dev/null; then
+            echo "- Deleted security group: $sg"
+        else
+            echo "- Skipped in-use security group: $sg"
+        fi
+    done
+}
+
 
 CLUSTER_NAME="banyantree"
 REGION="us-east-2"
@@ -48,7 +90,9 @@ echo "                  EKS CLUSTER DELETION"
 echo "========================================================="
 
 echo "Deleting EKS cluster: $CLUSTER_NAME in $REGION..."
-eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION"
+if ! eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION"; then
+    echo "Cluster not found or already deleted. Skipping cluster deletion."
+fi
 wait_for_cluster_deletion
 
 echo "========================================================="
@@ -110,23 +154,41 @@ echo "========================================================="
 echo "                  RESIDUAL SERVICE CHECK"
 echo "========================================================="
 
-echo "------------- Autoscaling Groups -------------"
-aws autoscaling describe-auto-scaling-groups --region $REGION --query 'AutoScalingGroups[*].[AutoScalingGroupName]' --output table
+echo "------------- CloudFormation Stacks -------------"
+echo "Checking for residual CloudFormation stacks..."
+STACK_COUNT=$(aws cloudformation describe-stacks --region "$REGION" --query 'length(Stacks[?starts_with(StackName, `eksctl-`)])')
+if [ "$STACK_COUNT" -gt 0 ]; then
+    delete_cloudformation_stacks
+else
+    echo "No EKS-related CloudFormation stacks found."
+fi
+
+echo "------------- OIDC Providers -------------"
+echo "Checking for OIDC providers..."
+OIDC_COUNT=$(aws iam list-open-id-connect-providers --query 'length(OpenIDConnectProviderList)')
+if [ "$OIDC_COUNT" -gt 0 ]; then
+    delete_oidc_providers
+else
+    echo "No OIDC providers found."
+fi
 
 echo "------------- Security Groups -------------"
-aws ec2 describe-security-groups --region $REGION --query 'SecurityGroups[?GroupName!=`default`].[GroupId,GroupName]' --output table
+echo "Checking for orphaned Security Groups..."
+SG_COUNT=$(aws ec2 describe-security-groups --region "$REGION" --query 'length(SecurityGroups[?GroupName!=`default`])')
+if [ "$SG_COUNT" -gt 0 ]; then
+    delete_orphaned_security_groups
+else
+    echo "No non-default security groups found."
+fi
+
+echo "------------- Autoscaling Groups -------------"
+aws autoscaling describe-auto-scaling-groups --region $REGION --query 'AutoScalingGroups[*].[AutoScalingGroupName]' --output table
 
 echo "------------- ENIs -------------"
 aws ec2 describe-network-interfaces --region $REGION --query 'NetworkInterfaces[*].[NetworkInterfaceId,Status,Description]' --output table
 
 echo "------------- Load Balancers -------------"
 aws elbv2 describe-load-balancers --region $REGION --query 'LoadBalancers[*].[LoadBalancerName,Type,State.Code]' --output table
-
-echo "------------- CloudFormation Stacks -------------"
-aws cloudformation describe-stacks --region $REGION --query 'Stacks[*].[StackName,StackStatus]' --output table
-
-echo "------------- OIDC Providers -------------"
-aws iam list-open-id-connect-providers
 
 echo "-------------------------------------------------"
 echo "EKS cluster and all detectable cost-associated resources have been reviewed and cleaned."
