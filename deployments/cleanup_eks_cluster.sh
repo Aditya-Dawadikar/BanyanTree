@@ -126,7 +126,7 @@ if [ -n "$NODEGROUPS" ]; then
         echo "- Deleting nodegroup: $NG"
         kubectl get pods --all-namespaces -o wide --field-selector spec.nodeName=$NODE | grep -vE 'Running|Completed'
 
-        eksctl delete nodegroup --cluster "$CLUSTER_NAME" --region "$REGION" --name "$NG" --force
+        eksctl delete nodegroup --cluster "$CLUSTER_NAME" --region "$REGION" --name "$NG" --disable-eviction
         wait_for_nodegroup_deletion "$NG"
     done
 else
