@@ -5,18 +5,20 @@ PROJECT_DIR="$HOME/BanyanTree"
 ECR_REPO="777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree"
 AWS_REGION="us-east-2"
 
+# 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:raft-node
+
 echo ">> Pulling latest code..."
 cd "$PROJECT_DIR"
 git pull origin master
 
 echo ">> Building and pushing Docker images..."
-docker build -t $ECR_REPO:raft-node -f raft-node/Dockerfile raft-node
+docker build -t $ECR_REPO:raft-node -f ../banyan_core/Dockerfile raft-node
 docker push $ECR_REPO:raft-node
 
-docker build -t $ECR_REPO:rootkeeper -f rootkeeper/Dockerfile rootkeeper
+docker tag $ECR_REPO:raft-node $ECR_REPO:rootkeeper
 docker push $ECR_REPO:rootkeeper
 
-docker build -t $ECR_REPO:sap-streamer -f sap-streamer/Dockerfile sap-streamer
+docker build -t $ECR_REPO:sap-streamer -f ../sap-streamer/Dockerfile sap-streamer
 docker push $ECR_REPO:sap-streamer
 
 echo ">> Cleaning up old Kubernetes resources..."
