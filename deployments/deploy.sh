@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-PROJECT_DIR="$HOME/banyantree"
+PROJECT_DIR="$HOME/BanyanTree"
 ECR_REPO="777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree"
 AWS_REGION="us-east-2"
 
