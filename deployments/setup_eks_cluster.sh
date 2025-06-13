@@ -66,7 +66,7 @@ echo "                  ECR REPO LIFECYCLE POLICY"
 echo "========================================================="
 
 
-echo "Applying lifecycle policy to expire untagged images older than 6 hours..."
+echo "Applying lifecycle policy to expire untagged images older than 1 day..."
 aws ecr put-lifecycle-policy \
   --repository-name "$REPO_NAME" \
   --region "$REGION" \

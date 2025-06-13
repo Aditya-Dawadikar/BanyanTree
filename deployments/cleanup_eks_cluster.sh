@@ -75,6 +75,28 @@ CLUSTER_NAME="banyantree"
 REGION="us-east-2"
 
 echo "========================================================="
+echo "                  EKSCTL INSTALLATION"
+echo "========================================================="
+
+# Install eksctl
+echo "Checking for previous eksctl installation..."
+if command -v eksctl &> /dev/null; then
+    echo "Removing existing eksctl binary..."
+    sudo rm -f "$(command -v eksctl)"
+fi
+
+echo "Downloading latest eksctl"
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" -o eksctl.tar.gz
+
+echo "Extracting and installing eksctl..."
+tar -xzf eksctl.tar.gz
+sudo mv eksctl /usr/local/bin/
+rm eksctl.tar.gz
+
+echo "eksctl installed"
+eksctl version
+
+echo "========================================================="
 echo "                  NODEGROUP DELETION"
 echo "========================================================="
 
