@@ -24,6 +24,7 @@ wait_for_cluster_deletion() {
 delete_cloudformation_stacks() {
     echo "Cleaning up CloudFormation stacks..."
     STACKS=$(aws cloudformation describe-stacks --region "$REGION" --query "Stacks[*].StackName" --output text)
+    
     for stack in $STACKS; do
         if [[ "$stack" == eksctl-* ]]; then
             echo "- Deleting stack: $stack"
@@ -31,13 +32,19 @@ delete_cloudformation_stacks() {
         fi
     done
 
+    echo "Monitoring stack deletion initiation..."
     for stack in $STACKS; do
         if [[ "$stack" == eksctl-* ]]; then
-            while aws cloudformation describe-stacks --region "$REGION" --stack-name "$stack" > /dev/null 2>&1; do
-                sleep 10
-                echo "...waiting for stack $stack to delete"
-            done
-            echo "Deleted stack: $stack"
+            STATUS=$(aws cloudformation describe-stacks --region "$REGION" \
+                --stack-name "$stack" \
+                --query "Stacks[0].StackStatus" \
+                --output text 2>/dev/null || echo "DELETED")
+            
+            if [[ "$STATUS" == "DELETE_IN_PROGRESS" || "$STATUS" == "DELETED" ]]; then
+                echo "Stack $stack is being deleted."
+            else
+                echo "Stack $stack not in DELETE_IN_PROGRESS (status=$STATUS)."
+            fi
         fi
     done
 }
@@ -156,6 +163,18 @@ echo "========================================================="
 
 echo "------------- CloudFormation Stacks -------------"
 echo "Checking for residual CloudFormation stacks..."
+
+# aws cloudformation describe-stacks \
+#  --query "Stacks[?StackStatus=='DELETE_IN_PROGRESS' || StackStatus=='ROLLBACK_IN_PROGRESS' || StackStatus=='UPDATE_ROLLBACK_IN_PROGRESS' || StackStatus=='CREATE_IN_PROGRESS' || StackStatus=='UPDATE_IN_PROGRESS'].[StackName,StackStatus]" \
+#  --output table
+
+# aws cloudformation describe-stacks --region us-east-2 --query 'length(Stacks[?starts_with(StackName, `eksctl-`)])'
+
+# aws cloudformation describe-stacks \
+#   --region us-east-2 \
+#   --query "Stacks[?starts_with(StackName, \`eksctl-\`)].StackName" \
+#   --output text
+
 STACK_COUNT=$(aws cloudformation describe-stacks --region "$REGION" --query 'length(Stacks[?starts_with(StackName, `eksctl-`)])')
 if [ "$STACK_COUNT" -gt 0 ]; then
     delete_cloudformation_stacks
