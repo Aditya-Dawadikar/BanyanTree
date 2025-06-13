@@ -20,25 +20,25 @@ spec:
             name: kafka-topic-script
         - name: scripts
           emptyDir: {}
-      initContainers:
-        - name: init-create-topics
-          image: confluentinc/cp-kafka:7.4.4
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              cp /config/create-topics.sh /scripts/create-topics.sh && \
-              chmod +x /scripts/create-topics.sh && \
-              /scripts/create-topics.sh
-          volumeMounts:
-            - name: topic-script
-              mountPath: /config
-            - name: scripts
-              mountPath: /scripts
-          env:
-            - name: KAFKA_BROKER_ID
-              value: "1"
-            - name: KAFKA_ZOOKEEPER_CONNECT
-              value: "zookeeper:2181"
+      # initContainers:
+      #   - name: init-create-topics
+      #     image: confluentinc/cp-kafka:7.4.4
+      #     command: ["/bin/bash", "-c"]
+      #     args:
+      #       - |
+      #         cp /config/create-topics.sh /scripts/create-topics.sh && \
+      #         chmod +x /scripts/create-topics.sh && \
+      #         /scripts/create-topics.sh
+      #     volumeMounts:
+      #       - name: topic-script
+      #         mountPath: /config
+      #       - name: scripts
+      #         mountPath: /scripts
+      #     env:
+      #       - name: KAFKA_BROKER_ID
+      #         value: "1"
+      #       - name: KAFKA_ZOOKEEPER_CONNECT
+      #         value: "zookeeper:2181"
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:7.4.4
