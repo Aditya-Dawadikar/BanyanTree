@@ -17,6 +17,7 @@ spec:
       containers:
         - name: rootkeeper
           image: 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:rootkeeper
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: http
@@ -24,6 +25,8 @@ spec:
             - name: NODE_ROLE
               value: ROOTKEEPER
             - name: NODE_ID
-              value: node0
+              value: rootkeeper
             - name: NODE_PORT
               value: "8000"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
