@@ -1,11 +1,13 @@
-# kafka-service.yaml
+# kafka-nodeport.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: kafka
+  name: kafka-external
 spec:
+  type: NodePort
   ports:
   - port: 9092
     targetPort: 9092
+    nodePort: 30092
   selector:
     app: kafka

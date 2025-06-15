@@ -1,3 +1,4 @@
+# kafka-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,77 +13,23 @@ spec:
       labels:
         app: kafka
     spec:
-      imagePullSecrets:
-        - name: ecr-creds
-      volumes:
-        - name: topic-script
-          configMap:
-            name: kafka-topic-script
-        - name: scripts
-          emptyDir: {}
-      # initContainers:
-      #   - name: init-create-topics
-      #     image: confluentinc/cp-kafka:7.4.4
-      #     command: ["/bin/bash", "-c"]
-      #     args:
-      #       - |
-      #         cp /config/create-topics.sh /scripts/create-topics.sh && \
-      #         chmod +x /scripts/create-topics.sh && \
-      #         /scripts/create-topics.sh
-      #     volumeMounts:
-      #       - name: topic-script
-      #         mountPath: /config
-      #       - name: scripts
-      #         mountPath: /scripts
-      #     env:
-      #       - name: KAFKA_BROKER_ID
-      #         value: "1"
-      #       - name: KAFKA_ZOOKEEPER_CONNECT
-      #         value: "zookeeper:2181"
       containers:
-        - name: kafka
-          image: confluentinc/cp-kafka:7.4.4
-          ports:
-            - containerPort: 9092
-            - containerPort: 9093
-          livenessProbe:
-            tcpSocket:
-              port: 9092
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            tcpSocket:
-              port: 9092
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          env:
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: KAFKA_BROKER_ID
-              value: "1"
-            - name: KAFKA_ZOOKEEPER_CONNECT
-              value: "zookeeper:2181"
-            - name: KAFKA_LISTENERS
-              value: PLAINTEXT://0.0.0.0:9092
-            - name: KAFKA_ADVERTISED_LISTENERS
-              value: PLAINTEXT://$(POD_IP):9092
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-              value: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-            - name: KAFKA_INTER_BROKER_LISTENER_NAME
-              value: PLAINTEXT
-            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-              value: "false"
-            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_LOG_RETENTION_MS
-              value: "1800000"
-            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
-              value: "1"
+      - name: kafka
+        image: bitnami/kafka:3.4
+        ports:
+        - containerPort: 9092
+        env:
+        - name: KAFKA_CFG_ZOOKEEPER_CONNECT
+          value: "zookeeper:2181"
+        - name: ALLOW_PLAINTEXT_LISTENER
+          value: "yes"
+        - name: KAFKA_CFG_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka:9092"
+        - name: KAFKA_CFG_LISTENERS
+          value: "PLAINTEXT://:9092"
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xmx512M -Xms256M"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
