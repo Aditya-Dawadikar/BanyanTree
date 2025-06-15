@@ -1,16 +1,10 @@
 from fastapi import APIRouter
-from fastapi.responses import RedirectResponse
-from config import ROOTKEEPER
 from elasticsearch import Elasticsearch
 from fastapi import Query, Path
 from typing import List, Optional
 
 def get_cluster_router(es: Elasticsearch):
     router = APIRouter()
-
-    @router.get("/cluster-state")
-    async def get_cluster_state():
-        return RedirectResponse(url=f"{ROOTKEEPER['node_url']}/cluster-state")
 
     @router.get("/logs/{topic}")
     async def get_cluster_logs(topic: str = Path(..., description="Kafka topic (e.g., 'raft-logs')"),

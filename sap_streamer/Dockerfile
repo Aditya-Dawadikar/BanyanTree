@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 3000
 
 # Run FastAPI app with uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000", "--log-level", "debug"]

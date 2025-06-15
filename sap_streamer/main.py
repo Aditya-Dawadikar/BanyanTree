@@ -1,54 +1,73 @@
-import uvicorn
-from fastapi import FastAPI
+import os
 import asyncio
-from contextlib import asynccontextmanager
-from typing import List
+from fastapi import FastAPI
 from routes import get_cluster_router
 from consumer import consume_logs
 from elasticsearch import Elasticsearch
+import logging
+import sys
 
-es = Elasticsearch("http://localhost:9200",
-                   headers={"Accept": "application/vnd.elasticsearch+json; compatible-with=8",
-                    "Content-Type": "application/vnd.elasticsearch+json; compatible-with=8"})
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
-class BackgroundTaskManager:
-    def __init__(self):
-        self.tasks: List[asyncio.Task] = []
-    
-    def add_task(self, task: asyncio.Task):
-        self.tasks.append(task)
-    
-    async def cancel_all(self):
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass  # Expected for cancelled tasks
+# Clear existing handlers if any
+if logger.hasHandlers():
+    logger.handlers.clear()
 
-task_manager = BackgroundTaskManager()
+# Create handler that logs to stdout
+handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('[%(levelname)s] %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    print("[STARTUP] Initializing background tasks...")
-    task_manager.add_task(asyncio.create_task(consume_logs(es)))
-    
-    yield
-    
-    # Shutdown
-    print("[SHUTDOWN] Stopping all background tasks...")
-    await task_manager.cancel_all()
-    print("[SHUTDOWN] All background tasks stopped")
+# Keep reference to background task
+task_handle = None
 
-app = FastAPI(lifespan=lifespan)
+print("[BOOT] App module loaded")
+app = FastAPI()
 
-app.include_router(get_cluster_router(es),
-                   prefix="/cluster")
+@app.on_event("startup")
+async def startup_event():
+    global task_handle
+    try:
+        # Environment vars
+        ES_SERVER = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200")
+        KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-# if __name__=="__main__":
-#     uvicorn.run("main:app",
-#                 host="0.0.0.0",
-#                 port=3000,
-#                 reload=True)
+        # Create client
+        es = Elasticsearch(ES_SERVER,
+                           verify_certs=False,   # or provide certs if available
+                            ssl_show_warn=False)
+
+        # Retry until Elasticsearch is up
+        for attempt in range(20):
+            if es.ping():
+                print(f"[INFO] Elasticsearch is reachable after {attempt+1} tries.")
+                break
+            print(f"[WAITING] Elasticsearch not ready yet, retrying... ({attempt+1}/20)")
+            await asyncio.sleep(3)
+        else:
+            raise ConnectionError("Elasticsearch did not become ready in time.")
+
+        app.state.es = es
+        print("[STARTUP] Connecting to Kafka...")
+        task_handle = asyncio.create_task(consume_logs(es))
+        print("[STARTUP] Log consumer task started")
+
+        app.include_router(get_cluster_router(app.state.es), prefix="/cluster")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to start log consumer: {e}", flush=True)
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global task_handle
+    print("[SHUTDOWN] Cancelling background tasks...", flush=True)
+    if task_handle:
+        task_handle.cancel()
+        try:
+            await task_handle
+        except asyncio.CancelledError:
+            print("[SHUTDOWN] Consumer task cancelled cleanly", flush=True)
+    print("[SHUTDOWN] Cleanup complete", flush=True)
