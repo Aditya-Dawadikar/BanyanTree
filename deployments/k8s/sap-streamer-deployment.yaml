@@ -17,11 +17,12 @@ spec:
       containers:
         - name: sap-streamer
           image: 777064612419.dkr.ecr.us-east-2.amazonaws.com/banyantree:sap-streamer
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: kafka:9093
+              value: "kafka:9092"
             - name: ELASTICSEARCH_HOST
-              value: http://elasticsearch:9200
+              value: "http://elasticsearch:9200"
