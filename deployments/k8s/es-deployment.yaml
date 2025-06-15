@@ -19,12 +19,12 @@ spec:
             - containerPort: 9200
           env:
             - name: discovery.type
-              value: single-node
+              value: "single-node"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
             - name: xpack.security.enabled
               value: "false"
-          volumeMounts:
-            - mountPath: /usr/share/elasticsearch/data
-              name: es-data
-      volumes:
-        - name: es-data
-          emptyDir: {}  # Use a PVC for persistent storage in production
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: network.host
+              value: "0.0.0.0"
