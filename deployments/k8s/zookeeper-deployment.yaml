@@ -1,3 +1,4 @@
+# zookeeper-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,12 +14,14 @@ spec:
         app: zookeeper
     spec:
       containers:
-        - name: zookeeper
-          image: confluentinc/cp-zookeeper:7.4.4
-          ports:
-            - containerPort: 2181
-          env:
-            - name: ZOOKEEPER_CLIENT_PORT
-              value: "2181"
-            - name: ZOOKEEPER_TICK_TIME
-              value: "2000"
+      - name: zookeeper
+        image: bitnami/zookeeper:3.8
+        ports:
+        - containerPort: 2181
+        env:
+        - name: ALLOW_ANONYMOUS_LOGIN
+          value: "yes"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
