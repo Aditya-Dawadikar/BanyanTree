@@ -15,7 +15,7 @@ from models import (RequestVoteRequest,
 from store import Store
 import random
 from collections import Counter
-from logger import BanyanCoreLogger
+from banyan_core_logger import BanyanCoreLogger
 
 
 

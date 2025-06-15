@@ -3,10 +3,10 @@ import sys
 def load_config(node_id):
     # Full cluster configuration
     all_nodes = {
-        "node0": "http://localhost:8000", # RootKeeper
-        "node1": "http://localhost:8001",
-        "node2": "http://localhost:8002",
-        "node3": "http://localhost:8003",
+        "rootkeeper": "http://rootkeeper:8000", # rootkeeper
+        "raft-node-0": "http://raft-node-0.raft-node:8000",
+        "raft-node-1": "http://raft-node-1.raft-node:8000",
+        "raft-node-2": "http://raft-node-2.raft-node:8000",
     }
 
     if node_id not in all_nodes:

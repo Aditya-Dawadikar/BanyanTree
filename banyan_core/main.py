@@ -5,7 +5,7 @@ from routes.raft_routes import get_router_with_node as raft_router
 from routes.store_routes import get_store_router as store_router
 from config_loader import load_config
 from raft_node import RaftNode
-from logger import BanyanCoreLogger
+from banyan_core_logger import BanyanCoreLogger
 
 
 app = FastAPI()
@@ -15,12 +15,13 @@ app = FastAPI()
 NODE_ID = os.getenv("NODE_ID")
 NODE_PORT = os.getenv("NODE_PORT")
 ROLE = os.getenv("NODE_ROLE")
+BOOTSTRAP_SERVER = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9093")
 
 if not NODE_ID:
     raise ValueError("Please set NODE_ID environment variable")
     
 # Identify rootkeeper ID (assume node0 is rootkeeper)
-ROOTKEEPER_ID = "node0"
+ROOTKEEPER_ID = "rootkeeper"
 
 # Load config
 PEERS, NODE_ROLES = load_config(NODE_ID)
@@ -28,9 +29,8 @@ PEERS, NODE_ROLES = load_config(NODE_ID)
 
 async def initialize_node() -> RaftNode:
 
-
     # Create RaftNode instance
-    logger = BanyanCoreLogger(node_id=NODE_ID)
+    logger = BanyanCoreLogger(node_id=NODE_ID, bootstrap_servers=BOOTSTRAP_SERVER)
     await logger.start_producer()
 
     node = RaftNode(node_id=NODE_ID,
