@@ -1,0 +1,166 @@
+:root {
+  /* Sizes */
+  --cube-size: 100px;
+  --face-size: 50px;
+
+  /* Common transforms */
+  --top-scaleY: 0.864;
+
+  /* Status Colors */
+  --online-top: #e9ffea;
+  --online-front: #9ac19b;
+  --online-side: #b2e2b3;
+  --online-shadow: rgba(34, 197, 94, 0.55);
+  --online-rim: rgba(34, 197, 94, 0.35);
+
+  --degraded-top: #fcf9b0;
+  --degraded-front: #e3dd43;
+  --degraded-side: #f4f07f;
+  --degraded-shadow: rgba(234, 179, 8, 0.55);
+  --degraded-rim: rgba(234, 179, 8, 0.35);
+
+  --offline-top: rgb(246, 165, 165);
+  --offline-front: rgb(216, 82, 82);
+  --offline-side: rgb(228, 117, 117);
+  --offline-shadow: rgba(239, 68, 68, 0.55);
+  --offline-rim: rgba(239, 68, 68, 0.35);
+
+  /* Leader Flag */
+  --leader-color: #0e308e;
+
+  /* Node label */
+  --label-bg: rgba(255, 255, 255, 0.5);
+
+  /* Surfaces */
+  --card-bg: #75e6c4;
+}
+
+/* Base cube */
+.cube {
+  width: var(--cube-size);
+  height: var(--cube-size);
+  position: relative;
+}
+
+.face {
+  transform-origin: 0 0;
+  position: absolute;
+  width: var(--face-size);
+  height: var(--face-size);
+  top: -83px;
+  left: -63px;
+}
+
+/* Neutral faces */
+.front {
+  background: #d1d5db;
+  transform: rotate(-30deg) skewX(-30deg) translate(130px, 172px) scaleY(var(--top-scaleY));
+}
+
+.top {
+  background: #fffbfb;
+  transform: rotate(210deg) skew(-30deg) translate(-200px, -60px) scaleY(var(--top-scaleY));
+}
+
+.side {
+  background: #e5e7eb;
+  transform: rotate(90deg) skewX(-30deg) scaleY(var(--top-scaleY)) translate(68px, -131px);
+}
+
+/* Status: Online */
+.cube.status-online .face.top {
+  background: var(--online-top);
+  box-shadow:
+    6px 6px 26px var(--online-shadow),
+    0 0 0 1px var(--online-rim) inset;
+}
+.cube.status-online .face.front {
+  background: var(--online-front);
+}
+.cube.status-online .face.side {
+  background: var(--online-side);
+}
+.cube.status-online .face.front,
+.cube.status-online .face.side {
+  box-shadow:
+    6px 6px 26px var(--online-shadow),
+    0 0 0 1px var(--online-rim) inset;
+}
+
+/* Status: Degraded */
+.cube.status-degraded .face.top {
+  background: var(--degraded-top);
+  box-shadow:
+    0 0 26px var(--degraded-shadow),
+    0 0 0 1px var(--degraded-rim) inset;
+}
+.cube.status-degraded .face.side {
+  background: var(--degraded-side);
+}
+.cube.status-degraded .face.front {
+  background: var(--degraded-front);
+}
+.cube.status-degraded .face.side,
+.cube.status-degraded .face.front {
+  box-shadow:
+    6px 6px 26px var(--degraded-shadow),
+    0 0 0 1px var(--degraded-rim) inset;
+}
+
+/* Status: Offline */
+.cube.status-offline .face.top {
+  background: var(--offline-top);
+  box-shadow:
+    0 0 26px var(--offline-shadow),
+    0 0 0 1px var(--offline-rim) inset;
+}
+.cube.status-offline .face.side {
+  background: var(--offline-side);
+}
+.cube.status-offline .face.front {
+  background: var(--offline-front);
+}
+.cube.status-offline .face.side,
+.cube.status-offline .face.front {
+  box-shadow:
+    0 0 26px var(--offline-shadow),
+    0 0 0 1px var(--offline-rim) inset;
+}
+
+/* Leader flag */
+.cube .leader-flag {
+  position: absolute;
+  right: 0px;
+  transform: translateX(-50%);
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--leader-color);
+  pointer-events: none;
+}
+
+/* Node label */
+.node-label {
+  font-size: 20px;
+  position: relative;
+  text-align: center;
+  overflow: hidden;
+  background-color: var(--label-bg);
+}
+
+/* Line effect */
+.line {
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 0, 0, 1) 50%,
+    transparent 100%
+  );
+}
+
+.node-bg {
+  height: 100%;
+}
+
+/* .card {
+  background-color: var(--card-bg);
+} */
